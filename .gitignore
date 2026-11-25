@@ -1,0 +1,26 @@
+node_modules/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+uploads/
+
+private-evidence/
+demo-uploads/
+demo-private-evidence/
+test-results/
+
+profile-photos/
+demo-profile-photos/
+
+# Entornos, secretos, respaldos y artefactos locales
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.session-secret
+*.session-secret
+backups/
+output/
+coverage/
