@@ -1,0 +1,19 @@
+.privacy-area { min-width:0; }
+.privacy-area h2,.privacy-area h3,.privacy-area h4 { margin:0; }
+.privacy-heading p,.privacy-list-heading p { color:var(--muted,#60756b); margin:8px 0 0; }
+.privacy-notice { margin:22px 0; padding:16px 18px; border:1px solid #d3e5d9; border-radius:12px; background:#f0f7f2; color:#304c3d; line-height:1.6; }
+.privacy-form { max-width:720px; }
+.privacy-form textarea,.privacy-admin-form textarea { min-height:110px; resize:vertical; }
+.privacy-form button { justify-self:start; }
+.privacy-success { color:#215e44; min-height:1em; }
+.privacy-list-heading { margin:32px 0 16px; }
+.privacy-list,.privacy-admin-list { display:grid; gap:14px; }
+.privacy-request { border:1px solid #dce7df; border-radius:14px; padding:18px; background:#fff; overflow-wrap:anywhere; }
+.privacy-request p { line-height:1.6; }
+.privacy-request-top { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+.privacy-request-top small { color:#65786e; }
+.privacy-status { flex:none; padding:5px 10px; border-radius:999px; color:#285d43; background:#e7f2ea; font-size:.78rem; font-weight:600; }
+.privacy-response { padding:12px; background:#f7faf7; border-radius:8px; }
+.privacy-admin-form { max-width:720px; }
+.privacy-empty { padding:24px; border:1px dashed #ceddd2; border-radius:12px; color:#65786e; }
+@media(max-width:480px) { .privacy-request-top { flex-direction:column; } .privacy-form button,.privacy-admin-form button { width:100%; } }

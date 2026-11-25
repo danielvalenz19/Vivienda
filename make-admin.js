@@ -1,0 +1,1 @@
+const {DatabaseSync}=require('node:sqlite');const email=process.argv[2];if(!email){console.error('Uso: node make-admin.js correo');process.exit(1)}const db=new DatabaseSync('vivienda.sqlite');let r=db.prepare("UPDATE users SET role='admin' WHERE email=?").run(email.toLowerCase());console.log(r.changes?'Cuenta actualizada. Volvé a iniciar sesión.':'Cuenta no encontrada.');

@@ -1,0 +1,7 @@
+.safety-report-dialog textarea,.safety-report-dialog select{width:100%}
+.chat-actions{display:flex;flex:none;flex-direction:column;align-items:flex-end}
+.chat-actions .chat-menu-action{padding:4px 8px}
+.chat-report-message{border:0;background:transparent;color:#5a7668;font:inherit;font-size:11px;cursor:pointer;padding:6px 3px}
+.chat-report-message:focus-visible{outline:3px solid #69a382;outline-offset:2px}
+.safety-context{white-space:pre-wrap;overflow-wrap:anywhere;max-height:45vh;overflow:auto}
+@media(max-width:760px){.chat-thread-head{gap:6px}.chat-actions .chat-menu-action{padding:3px;font-size:10px}}

@@ -1,0 +1,36 @@
+{
+  "name": "vivienda-gt",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server.js",
+    "demo": "DEMO_AUTH=1 DB_PATH=\"$PWD/demo.sqlite\" PHOTO_DIR=\"$PWD/demo-uploads\" PROFILE_PHOTO_DIR=\"$PWD/demo-profile-photos\" EVIDENCE_DIR=\"$PWD/demo-private-evidence\" node server.js",
+    "demo:seed": "node scripts/seed-demo.js",
+    "test": "node --test tests/*.test.js",
+    "test:e2e": "playwright test --config tests/playwright.config.js",
+    "check": "node scripts/check-syntax.js",
+    "test:maps": "playwright test --config tests/maps.playwright.config.js",
+    "lint": "eslint .",
+    "test:integration": "node --test tests/*.test.js",
+    "audit:deps": "npm audit --audit-level=moderate",
+    "test:e2e:all": "node scripts/test-browser-all.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "express": "^5.3.0",
+    "express-session": "^1.19.0",
+    "helmet": "^8.3.0",
+    "multer": "^2.5.0",
+    "nodemailer": "^10.6.1",
+    "sharp": "^0.35.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.1",
+    "eslint": "^10.15.0"
+  }
+}

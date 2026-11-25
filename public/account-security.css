@@ -1,0 +1,11 @@
+.account-security{max-width:680px}
+.account-security-section{padding:24px 0;border-top:1px solid #dce6df}
+.account-security-section h3{margin:0 0 8px}
+.account-security-section p{color:#536861}
+.account-security-section .error{color:#ad302d;min-height:1em}
+.account-security-section small{color:#536861}
+.account-security-section button:disabled{opacity:.65;cursor:wait}
+.terms-acceptance{display:flex;align-items:flex-start;gap:10px;font-size:13px;line-height:1.55;color:#314940}
+.terms-acceptance input[type=checkbox]{width:20px;min-width:20px;height:20px;min-height:20px;margin:2px 0 0;padding:0;accent-color:#245947}
+.terms-acceptance a{color:#245947;text-decoration:underline;text-underline-offset:2px}
+.mfa-secret,.mfa-recovery-codes{display:block;overflow-wrap:anywhere;white-space:pre-wrap;padding:14px;border-radius:9px;background:#f0f5f1;font-size:14px;letter-spacing:.04em}

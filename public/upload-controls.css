@@ -1,0 +1,16 @@
+/* Preserve the native accessible file picker while keeping its status legible on phones. */
+.wizard-page input[type="file"] {
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 400;
+}
+.wizard-page input[type="file"]::file-selector-button {
+  padding: 6px 10px;
+  margin-right: 8px;
+  border: 1px solid #adc2b5;
+  border-radius: 6px;
+  background: #fff;
+  color: #1c5847;
+  font: 600 12px Poppins, sans-serif;
+  cursor: pointer;
+}

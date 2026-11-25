@@ -1,0 +1,28 @@
+'use strict';
+const {test,expect}=require('@playwright/test');
+const {DatabaseSync}=require('node:sqlite');
+const {fixture}=require('./fixture-server');
+const path=require('node:path');
+let site;
+test.beforeEach(async()=>{site=await fixture()});
+test.afterEach(async()=>site.close());
+test('edición de anuncio persiste precio y exige revisión al cambiar ubicación',async({page})=>{
+ await page.setViewportSize({width:390,height:844});
+ await page.goto(site.url);await page.locator('.nav-actions [data-action="account"]').click();
+ await page.getByLabel('Correo electrónico').fill('owner@example.test');await page.getByLabel('Contraseña').fill('BrowserTest123!');
+ await page.locator('#login-form').getByRole('button',{name:'Ingresar'}).click();
+ await page.getByRole('button',{name:'Editar anuncio'}).click();
+ await expect(page.getByRole('heading',{name:'Editar vivienda'})).toBeVisible();
+ await page.screenshot({path:path.join(__dirname,'../output/screenshots/edicion-390.png'),fullPage:true});
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();
+ await page.getByLabel('Renta mensual (Q)').fill('2900');await page.getByRole('button',{name:'Guardar cambios'}).click();
+ await expect(page.getByText('Cambios guardados.',{exact:true})).toBeVisible();
+ let db=new DatabaseSync(site.dbPath);let row=db.prepare('SELECT price,status FROM listings WHERE id=?').get(site.listing);db.close();
+ expect(row.price).toBe(2900);expect(row.status).toBe('active');
+ await page.getByRole('button',{name:'Editar anuncio'}).click();await page.getByLabel('Zona o sector aproximado').fill('Zona 5');
+ await page.getByRole('button',{name:'Guardar cambios'}).click();
+ await expect(page.getByText('Cambios guardados. El anuncio está pendiente de revisión.')).toBeVisible();
+ db=new DatabaseSync(site.dbPath);row=db.prepare('SELECT area,status,authorization FROM listings WHERE id=?').get(site.listing);db.close();
+ expect(row.area).toBe('Zona 5');expect(row.status).toBe('pending');expect(row.authorization).toBe('pending');
+ await page.goto(site.url+'/#/vivienda/'+site.listing);await expect(page.getByRole('heading',{name:'Esta vivienda no está disponible'})).toBeVisible();
+});

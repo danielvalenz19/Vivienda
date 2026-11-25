@@ -1,0 +1,104 @@
+'use strict';
+const {request:csrfRequest}=require('./csrf-test-client');
+// These tests start an isolated server with a temporary database and photo directory.
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const {spawn}=require('node:child_process');
+const {mkdtemp,rm,readFile}=require('node:fs/promises');
+const {tmpdir}=require('node:os');
+const path=require('node:path');
+const net=require('node:net');
+const {DatabaseSync}=require('node:sqlite');
+const sharp=require('sharp');
+const root=path.resolve(__dirname,'..');
+async function freePort(){const server=net.createServer();await new Promise((ok,fail)=>server.listen(0,'127.0.0.1',ok).on('error',fail));const port=server.address().port;await new Promise(ok=>server.close(ok));return port;}
+async function startServer(port,dbPath,photoDir){
+ const child=spawn(process.execPath,['server.js'],{cwd:root,env:{...process.env,PORT:String(port),DB_PATH:dbPath,PHOTO_DIR:photoDir,PROFILE_PHOTO_DIR:path.join(path.dirname(photoDir),'profile-photos'),EVIDENCE_DIR:path.join(path.dirname(photoDir),'evidence'),DEMO_AUTH:'0',SESSION_SECRET:'test-only-not-production'},stdio:['ignore','pipe','pipe']});
+ let errors='';child.stderr.on('data',x=>errors+=x);
+ await new Promise((ok,fail)=>{const timer=setTimeout(()=>fail(new Error('Server startup timed out: '+errors)),10000);child.stdout.on('data',x=>{if(String(x).includes('Vivienda GT en')){clearTimeout(timer);ok();}});child.once('error',fail);child.once('exit',code=>{clearTimeout(timer);fail(new Error('Server exited '+code+': '+errors));});});
+ return child;
+}
+function client(port){let cookie='';const base=`http://127.0.0.1:${port}`;return async(method,url,data)=>{let headers={};if(data!==undefined&&!(data instanceof FormData))headers['content-type']='application/json';const options={method,headers,body:data===undefined?undefined:data instanceof FormData?data:JSON.stringify(data)};const {response,cookie:updated}=await csrfRequest(base,'/api'+url,options,cookie);cookie=updated;return {status:response.status,body:await response.json().catch(()=>null)};};}
+function expect(response,status){assert.equal(response.status,status,JSON.stringify(response.body));return response.body;}
+test('circuitos de cuenta, publicación, privacidad, reputación y vigencia sobre base temporal',async()=>{
+ const dir=await mkdtemp(path.join(tmpdir(),'vivienda-test-'));const dbPath=path.join(dir,'test.sqlite'),photoDir=path.join(dir,'photos'),port=await freePort();let proc;
+ try{
+  proc=await startServer(port,dbPath,photoDir);
+  const owner=client(port),visitor=client(port),stranger=client(port),admin=client(port),guest=client(port);
+  const policy=expect(await guest('GET','/policies/current'),200);
+  assert.equal(policy.version,'demo-borrador-2026-11-25');assert.equal(policy.preliminary,true);
+  const unaccepted={name:'Prueba',email:'sin-aceptar@example.test',password:'TestPass123!'};
+  expect(await guest('POST','/register',unaccepted),400);
+  expect(await guest('POST','/register',{...unaccepted,terms_accepted:false}),400);
+  expect(await guest('POST','/register',{...unaccepted,terms_accepted:'true'}),400);
+  const register=(c,name,email)=>c('POST','/register',{name,email,password:'TestPass123!',role:'admin',terms_accepted:true});
+  const o=expect(await register(owner,'Dueña','owner@example.test'),200);
+  const v=expect(await register(visitor,'Interesada','visitor@example.test'),200);
+  const x=expect(await register(stranger,'Otra persona','other@example.test'),200);
+  const a=expect(await register(admin,'Moderadora','admin@example.test'),200);
+  assert.equal(o.role,'user');assert.equal(v.role,'user');assert.equal(a.role,'user','registro público no asigna roles de administración');
+  expect(await guest('GET','/admin'),403);expect(await visitor('GET','/admin'),403);
+  const db=new DatabaseSync(dbPath);
+  assert.equal(db.prepare("SELECT count(*) n FROM users WHERE email=?").get(unaccepted.email).n,0);
+  const consent=db.prepare('SELECT version,accepted_at FROM legal_acceptances WHERE user=?').get(o.id);
+  assert.equal(consent.version,policy.version);assert.ok(consent.accepted_at);
+  db.prepare("UPDATE users SET role='admin' WHERE id=?").run(a.id);db.close();
+  expect(await admin('GET','/me'),401);expect(await admin('POST','/login',{email:'admin@example.test',password:'TestPass123!'}),200);
+  const data={title:'Apartamento de prueba',city:'Xela',area:'Zona 3',type:'Apartamento',price:2600,deposit:2000,description:'Vivienda ficticia para pruebas de integración.',rooms:2,baths:1,services:'Agua, internet'};
+  const listing=expect(await owner('POST','/listings',data),200).id;
+  assert.equal(expect(await guest('GET','/listings'),200).length,0,'pendiente no aparece');
+  expect(await stranger('POST',`/listings/${listing}/edit`,{title:'Acceso indebido'}),404);
+  expect(await admin('POST',`/admin/listings/${listing}`,{status:'active',authorization:true}),400);
+  const photoBytes=await sharp({create:{width:10,height:10,channels:3,background:'#448866'}}).jpeg().withMetadata().toBuffer();
+  const form=new FormData();form.append('photos',new Blob([photoBytes],{type:'image/jpeg'}),'test.jpg');
+  const photo=expect(await owner('POST',`/listings/${listing}/photos`,form),200).photos[0];
+  expect(await stranger('GET',`/listings/${listing}/photos`),404);
+  const intrusion=new FormData();intrusion.append('photos',new Blob([photoBytes],{type:'image/jpeg'}),'unauthorized.jpg');
+  expect(await stranger('POST',`/listings/${listing}/photos`,intrusion),404);
+  expect(await guest('GET',`/photos/${photo}`),404);
+  const stored=await readFile(path.join(photoDir,photo+'.webp'));assert.equal((await sharp(stored).metadata()).exif,undefined,'se eliminan metadatos EXIF');
+  expect(await owner('POST','/verification',{}),200);expect(await admin('POST',`/admin/verifications/${o.id}`,{status:'approved'}),200);
+  expect(await admin('POST',`/admin/listings/${listing}`,{status:'active'}),400);
+  expect(await admin('POST',`/admin/listings/${listing}`,{status:'active',authorization:true}),400);
+  const proof=new FormData();proof.append('evidence',new Blob([photoBytes],{type:'image/jpeg'}),'ficticio.jpg');
+  const evidence=expect(await owner('POST',`/listings/${listing}/evidence`,proof),201).id;
+  expect(await stranger('GET',`/evidence/${evidence}`),404);
+  expect(await admin('GET',`/evidence/${evidence}`),400);
+  expect(await admin('GET',`/evidence/${evidence}?reason=Revisi%C3%B3n%20ficticia%20de%20la%20solicitud`),200);
+  expect(await admin('POST',`/admin/listings/${listing}`,{status:'active',authorization:true}),200);
+  assert.equal(expect(await guest('GET','/listings'),200).length,1);
+  expect(await visitor('POST',`/favorites/${listing}`,{}),200);
+  const dbSuspension=new DatabaseSync(dbPath);
+  dbSuspension.prepare('UPDATE users SET suspended=1 WHERE id=?').run(o.id);
+  assert.equal(expect(await visitor('GET','/favorite-listings'),200)[0].status,'suspended');
+  expect(await stranger('POST',`/favorites/${listing}`,{}),400);
+  dbSuspension.prepare('UPDATE users SET suspended=0 WHERE id=?').run(o.id);
+  dbSuspension.close();
+  expect(await visitor('POST','/visits',{listing}),400,'conversación sola no equivale a visita');
+  expect(await visitor('POST','/messages',{listing,body:'Hola, ¿podemos hablar sobre la vivienda?'}),200);
+  const message=expect(await visitor('GET','/messages'),200)[0];
+  assert.equal(expect(await stranger('GET','/messages'),200).length,0);
+  expect(await stranger('POST','/reply',{message:message.id,body:'Mensaje no autorizado'}),400);
+  const visit=expect(await visitor('POST','/visits',{listing}),200).id;
+  expect(await visitor('POST','/reviews',{visit,rating:5,body:'Buena atención durante la visita.'}),400);
+  expect(await visitor('POST',`/visits/${visit}/confirm`,{}),200);
+  expect(await owner('POST',`/visits/${visit}/confirm`,{}),200);
+  expect(await owner('POST','/reviews',{visit,rating:5,body:'No debo poder evaluarme.'}),403);
+  expect(await visitor('POST','/reviews',{visit,rating:5,communication:6,body:'Buena atención durante la visita.'}),400);
+  expect(await visitor('POST','/reviews',{visit,rating:5,communication:4,accuracy:5,treatment:3,body:'Buena atención durante la visita.'}),200);
+  expect(await visitor('POST','/reviews',{visit,rating:5,body:'No debo duplicar la reseña.'}),409);
+  const queue=expect(await admin('GET','/admin/review-queue'),200);
+  assert.equal(queue.reviews.length,1);expect(await admin('POST',`/admin/reviews/${queue.reviews[0].id}`,{status:'approved'}),200);
+  const profile=expect(await guest('GET',`/profiles/${o.id}`),200);assert.equal(profile.average,5);assert.equal(profile.review_count,1);assert.equal('reviewer' in profile.reviews[0],false);assert.equal(profile.reviews[0].communication,4);assert.equal(profile.reviews[0].accuracy,5);assert.equal(profile.reviews[0].treatment,3);
+  expect(await visitor('POST','/reports',{listing,reason:'Reporte ficticio para probar.'}),200);
+  const adminData=expect(await admin('GET','/admin'),200);assert.equal(adminData.reports.length,1);
+  assert.ok(adminData.audit.some(event=>event.action==='active' && event.entity==='listing'));
+  expect(await admin('POST',`/admin/reports/${adminData.reports[0].id}`,{status:'resolved'}),200);
+  assert.equal(expect(await admin('GET','/admin'),200).reports[0].status,'resolved');
+  expect(await visitor('POST','/blocks',{user:o.id}),200);expect(await owner('POST','/reply',{message:message.id,body:'Bloqueado'}),403);
+  const db2=new DatabaseSync(dbPath);db2.prepare("UPDATE listings SET confirmed=datetime('now','-15 days') WHERE id=?").run(listing);db2.close();
+  assert.equal(expect(await guest('GET','/listings'),200).length,0,'vencido no aparece en resultados');
+  expect(await owner('POST',`/listings/${listing}/confirm`,{}),200);assert.equal(expect(await guest('GET','/listings'),200).length,1);
+  expect(await owner('POST',`/listings/${listing}/status`,{status:'rented'}),200);assert.equal(expect(await guest('GET','/listings'),200).length,0);
+ }finally{if(proc && proc.exitCode===null){proc.kill('SIGTERM');await new Promise(ok=>proc.once('exit',ok));}await rm(dir,{recursive:true,force:true});}
+});

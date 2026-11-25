@@ -1,0 +1,41 @@
+'use strict';
+const {request:csrfRequest}=require('./csrf-test-client');
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const {DatabaseSync}=require('node:sqlite');
+const {fixture}=require('./fixture-server');
+const {codeAt}=require('../mfa-routes');
+function client(base){let cookie='';return async(path,data)=>{const options=data===undefined?{}:{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(data)};const {response,cookie:updated}=await csrfRequest(base,'/api'+path,options,cookie);cookie=updated;return {status:response.status,body:await response.json().catch(()=>({}))}}}
+test('roles de moderación y verificación aplican permisos, conflicto de interés y MFA',async t=>{
+ const f=await fixture();t.after(()=>f.close());const db=new DatabaseSync(f.dbPath);
+ const pass=db.prepare("SELECT password FROM users WHERE email='owner@example.test'").get().password;
+ for(const [name,email,role] of [['Moderación','moderator@example.test','moderator'],['Verificación','verifier@example.test','verifier']])db.prepare('INSERT INTO users(name,email,password,role) VALUES(?,?,?,?)').run(name,email,pass,role);
+ const ids=Object.fromEntries(db.prepare("SELECT email,id FROM users").all().map(x=>[x.email,x.id]));
+ const pendingOwner=ids['pending@example.test'],modId=ids['moderator@example.test'],verifierId=ids['verifier@example.test'];
+ const insert=db.prepare("INSERT INTO listings(owner,title,city,area,type,price,deposit,description,rooms,baths,status,authorization,confirmed) VALUES(?,'Anuncio ficticio','Xela','Zona 3','Cuarto',1000,1000,'Descripción ficticia',1,1,'pending','pending',CURRENT_TIMESTAMP)");
+ const pending=Number(insert.run(pendingOwner).lastInsertRowid),own=Number(insert.run(verifierId).lastInsertRowid);
+ const evidence='a'.repeat(32);db.prepare("INSERT INTO listing_evidence(id,listing,owner,expires) VALUES(?,?,?,datetime('now','+30 days'))").run(evidence,pending,pendingOwner);
+ const report=Number(db.prepare("INSERT INTO reports(listing,reporter,reason) VALUES(?,?,?)").run(f.listing,f.guest,'Reporte ficticio').lastInsertRowid);
+ const selfReport=Number(db.prepare("INSERT INTO reports(listing,reporter,reason) VALUES(?,?,?)").run(f.listing,modId,'Mi reporte ficticio').lastInsertRowid);
+ const mod=client(f.url),verify=client(f.url),user=client(f.url);const signIn=email=>({email,password:'BrowserTest123!'});
+ assert.equal((await mod('/login',signIn('moderator@example.test'))).status,200);assert.equal((await verify('/login',signIn('verifier@example.test'))).status,200);await user('/login',signIn('guest@example.test'));
+ assert.equal((await mod('/staff/moderation')).status,200);assert.equal((await mod('/staff/verification')).status,403);assert.equal((await verify('/staff/verification')).status,200);assert.equal((await verify('/staff/moderation')).status,403);assert.equal((await user('/staff/moderation')).status,403);
+ for(const c of [mod,verify]){assert.equal((await c('/admin')).status,403);assert.equal((await c('/admin/users')).status,403);assert.equal((await c('/admin/review-queue')).status,403)}
+ const queue=(await mod('/staff/moderation')).body;assert.ok(queue.reports.some(x=>x.id===report));assert.ok(!queue.reports.some(x=>x.id===selfReport));assert.equal((await mod('/staff/reports/'+selfReport,{status:'resolved'})).status,403);
+ assert.equal((await verify('/staff/listings/'+own,{status:'rejected'})).status,403);
+ assert.equal((await mod('/listings/'+pending+'/evidence?reason=revision%20de%20autorizacion')).status,404);
+ assert.equal((await verify('/listings/'+pending+'/evidence')).status,400);
+ assert.equal((await verify('/listings/'+pending+'/evidence?reason=revision%20de%20autorizacion')).status,200);
+ assert.equal(db.prepare('SELECT COUNT(*) n FROM evidence_access WHERE actor=?').get(verifierId).n,1);
+ assert.equal((await mod('/staff/verifications/'+pendingOwner,{status:'approved'})).status,403);
+ assert.equal((await verify('/staff/verifications/'+pendingOwner,{status:'approved'})).status,200);
+ assert.equal((await verify('/staff/listings/'+pending,{status:'active',authorization:true})).status,200);
+ assert.equal((await verify('/listings/'+pending+'/evidence?reason=revision%20de%20autorizacion')).status,404);
+ assert.equal((await mod('/staff/reports/'+report,{status:'resolved'})).status,200);
+ assert.ok(db.prepare('SELECT 1 FROM audit WHERE actor=? AND action=? AND entity=?').get(modId,'resolved','report'));
+ const setup=await mod('/mfa/setup',{current_password:'BrowserTest123!'});assert.equal(setup.status,200);
+ const activated=await mod('/mfa/activate',{code:codeAt(setup.body.secret,Math.floor(Date.now()/30000))});assert.equal(activated.status,200);assert.equal((await mod('/staff/moderation')).status,200);
+ const another=client(f.url);await another('/login',signIn('moderator@example.test'));let denied=await another('/staff/moderation');assert.equal(denied.status,403);assert.equal(denied.body.code,'MFA_REQUIRED');
+ assert.equal((await another('/mfa/challenge',{code:activated.body.recovery_codes[0]})).status,200);assert.equal((await another('/staff/moderation')).status,200);
+ db.close();
+});
